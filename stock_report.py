@@ -7,71 +7,69 @@ import time
 
 def get_sector_data():
     return {
-        "반도체": ['005930.KS', '000660.KS', '042700.KS', '066970.KS', '282330.KS'], # 삼성, 하이닉스, 한미, 엘비, BGF(X) -> BGF리테일은 아님. 
-        "이차전지": ['373220.KS', '006400.KS', '051910.KS', '247540.KQ', '091990.KQ'], # LG엔솔, SDI, LG화학, 에코프로비엠, 엘앤에프
-        "자동차": ['005380.KS', '000270.KS', '001230.KS', '012330.KS'], # 현대차, 기아, 현대모비스, 현대글로비스
-        "바이오": ['207940.KS', '068270.KS', '326030.KS', '183490.KQ'], # 삼바, 셀트리온, SK바이오팜, 엔케이맥스(X) -> 휴젤
-        "인터넷/플랫폼": ['035420.KS', '035720.KS', '293490.KQ'], # 네이버, 카카오, 카카오게임즈
-        "금융": ['105560.KS', '055550.KS', '086790.KS', '316140.KS', '003550.KS'], # KB, 신한, 하나, 우리, LG
-        "철강": ['005490.KS', '004020.KS', '016380.KS'], # 포스코, 현대제철, 세아베스틸
-        "통신": ['017670.KS', '030200.KS', '032640.KS'], # SKT, KT, LGU+
-        "게임": ['259960.KS', '036570.KS', '251270.KQ', '063080.KQ'], # 크래프톤, 엔씨, 넷마블, 게임빌
-        "엔터테인먼트": ['352820.KS', '035900.KQ', '041510.KQ', '122870.KQ'], # 하이브, JYP, SM, YG
-        "화장품": ['051900.KS', '002790.KS', '192820.KS', '161890.KS', '131970.KS', '214320.KS'] # LG생활건강, 아모레, 코스맥스, 한국콜마, 토니모리, 아모레G
+        "반도체": ['005930.KS', '000660.KS', '042700.KS', '058470.KQ', '000990.KS'],
+        "이차전지": ['373220.KS', '006400.KS', '051910.KS', '247540.KQ', '003670.KS'],
+        "자동차": ['005380.KS', '000270.KS', '012330.KS', '011280.KS'],
+        "바이오": ['207940.KS', '068270.KS', '000100.KS', '326030.KS'],
+        "인터넷/플랫폼": ['035420.KS', '035720.KS', '323410.KS', '377300.KS'],
+        "금융": ['105560.KS', '055550.KS', '086790.KS', '316140.KS', '003550.KS'],
+        "철강": ['005490.KS', '004020.KS', '016380.KS'],
+        "통신": ['017670.KS', '030200.KS', '032640.KS'],
+        "게임": ['259960.KS', '036570.KS', '251270.KQ', '063080.KQ'],
+        "엔터테인먼트": ['352820.KS', '035900.KQ', '041510.KQ', '122870.KQ'],
+        "화장품": ['051900.KS', '002790.KS', '192820.KS', '161890.KS', '214320.KS']
     }
 
 def get_stats_yf(tickers):
-    data = yf.download(tickers, period="30d", interval="1d", progress=False)
+    # Fetch enough data for comparisons
+    data = yf.download(tickers, period="60d", interval="1d", progress=False)
     if data.empty:
         return None
         
-    # Handle both Single and Multi-ticker cases
     def get_ticker_df(t):
         if len(tickers) > 1:
-            return data.xs(t, axis=1, level=1)
+            try:
+                return data.xs(t, axis=1, level=1)
+            except:
+                return pd.DataFrame()
         return data
 
     dates = data.index.tolist()
-    # Indices
-    t_idx = -1 # Today
-    y_idx = -2 # Yesterday
-    db_idx = -3 # Day before yesterday
     
-    # Last week (~5 trading days)
-    w_idx = -6 if len(dates) >= 6 else 0
-    pw_idx = -11 if len(dates) >= 11 else 0
-
-    results = {}
-
-    def calc_period(t_list, start_idx, end_idx, base_idx):
+    def calc_period_metrics(t_list, start_idx, end_idx, base_start_idx, base_end_idx):
         prices = []
         volumes = []
         base_volumes = []
         
         for t in t_list:
+            tdf = get_ticker_df(t)
+            if tdf.empty or len(tdf) < abs(min(start_idx, base_start_idx)):
+                continue
+                
             try:
-                tdf = get_ticker_df(t)
-                # Price: compare end_idx with base_idx (previous period close)
-                # Or for 'Today', compare Close[-1] with Close[-2]
+                # Price change: Current Close vs Baseline Close
                 curr_p = tdf['Close'].iloc[end_idx]
-                prev_p = tdf['Close'].iloc[base_idx]
+                prev_p = tdf['Close'].iloc[base_end_idx]
+                
                 if prev_p > 0:
                     prices.append((curr_p - prev_p) / prev_p * 100)
                 
-                # Volume: compare mean of [start:end] with base
-                curr_v = tdf['Volume'].iloc[start_idx:end_idx+1 if end_idx != -1 else None].mean()
-                volumes.append(curr_v)
+                # Volume metrics
+                # Current period slice
+                s = start_idx
+                e = end_idx + 1 if end_idx != -1 else None
+                curr_v = tdf['Volume'].iloc[s:e].mean()
                 
-                if base_idx is not None:
-                    # For a period, baseline is the volume of the previous equivalent period
-                    # Simplification: compare with the day before start_idx
-                    # Or for week, compare with previous week
-                    if start_idx == end_idx: # Single day
-                        prev_v = tdf['Volume'].iloc[base_idx]
-                    else: # Period
-                        prev_v = tdf['Volume'].iloc[max(0, start_idx-(end_idx-start_idx+1)):start_idx].mean()
+                # Baseline period slice
+                bs = base_start_idx
+                be = base_end_idx + 1 if base_end_idx != -1 else None
+                prev_v = tdf['Volume'].iloc[bs:be].mean()
+                
+                if not pd.isna(curr_v):
+                    volumes.append(curr_v)
+                if not pd.isna(prev_v):
                     base_volumes.append(prev_v)
-            except:
+            except Exception as e:
                 continue
         
         avg_price = sum(prices) / len(prices) if prices else 0
@@ -84,12 +82,12 @@ def get_stats_yf(tickers):
         
         return avg_price, avg_vol_inc
 
-    # Today vs Yesterday
-    res_t = calc_period(tickers, t_idx, t_idx, y_idx)
-    # Yesterday vs DBY
-    res_y = calc_period(tickers, y_idx, y_idx, db_idx)
-    # Week (last 5 days) vs Previous 5 days
-    res_w = calc_period(tickers, -5, -1, -6) # Simplified
+    # 1. 당일 (Today -1 vs Yesterday -2)
+    res_t = calc_period_metrics(tickers, -1, -1, -2, -2)
+    # 2. 어제 (Yesterday -2 vs Day Before -3)
+    res_y = calc_period_metrics(tickers, -2, -2, -3, -3)
+    # 3. 주간 (Last 5 days -5:-1 vs Prev 5 days -10:-6)
+    res_w = calc_period_metrics(tickers, -5, -1, -10, -6)
 
     return {
         "당일": res_t,
@@ -99,31 +97,33 @@ def get_stats_yf(tickers):
 
 def get_investor_trends(tickers, start_date, end_date):
     # Try pykrx for investor trends (KRX only)
-    # Convert yfinance tickers back to pykrx codes
     codes = [t.split('.')[0] for t in tickers]
     
-    try:
-        # Bulk fetch
-        net_purchase = stock.get_market_net_purchases_of_equities_by_ticker(start_date, end_date, "ALL")
-        # Trading value for normalization
-        # Note: get_market_price_change might fail, so we'll use a safer approach if needed
-        # But for now let's try
-        trading_value = stock.get_market_price_change(start_date, end_date)
-        
-        c_val = '거래대금' if '거래대금' in trading_value.columns else 'Value'
-        
-        ind_sum, for_sum, ins_sum, val_sum = 0, 0, 0, 0
-        for c in codes:
-            if c in net_purchase.index and c in trading_value.index:
-                ind_sum += net_purchase.loc[c, '개인'] if '개인' in net_purchase.columns else 0
-                for_sum += net_purchase.loc[c, '외국인'] if '외국인' in net_purchase.columns else 0
-                ins_sum += net_purchase.loc[c, '기관합계'] if '기관합계' in net_purchase.columns else 0
-                val_sum += trading_value.loc[c, c_val] if c_val in trading_value.columns else 0
-        
-        if val_sum > 0:
-            return round(ind_sum/val_sum*100, 2), round(for_sum/val_sum*100, 2), round(ins_sum/val_sum*100, 2)
-    except:
-        pass
+    ind_sum, for_sum, ins_sum, val_sum = 0, 0, 0, 0
+    
+    # Try both KOSPI and KOSDAQ
+    for mkt in ["KOSPI", "KOSDAQ"]:
+        try:
+            # Note: get_market_net_purchases_of_equities_by_ticker is usually more reliable than 'ALL'
+            net_purchase = stock.get_market_net_purchases_of_equities_by_ticker(start_date, end_date, mkt)
+            trading_value = stock.get_market_price_change(start_date, end_date, mkt)
+            
+            if net_purchase.empty or trading_value.empty:
+                continue
+                
+            c_val = '거래대금' if '거래대금' in trading_value.columns else 'Value'
+            
+            for c in codes:
+                if c in net_purchase.index and c in trading_value.index:
+                    ind_sum += net_purchase.loc[c, '개인'] if '개인' in net_purchase.columns else 0
+                    for_sum += net_purchase.loc[c, '외국인'] if '외국인' in net_purchase.columns else 0
+                    ins_sum += net_purchase.loc[c, '기관합계'] if '기관합계' in net_purchase.columns else 0
+                    val_sum += trading_value.loc[c, c_val] if c_val in trading_value.columns else 0
+        except:
+            continue
+            
+    if val_sum > 0:
+        return round(ind_sum/val_sum*100, 2), round(for_sum/val_sum*100, 2), round(ins_sum/val_sum*100, 2)
     return 0.0, 0.0, 0.0
 
 def main():
@@ -146,9 +146,9 @@ def main():
     results = []
     
     for sector, tickers in sectors.items():
-        print(f"분석 중: {sector}...")
         metrics = get_stats_yf(tickers)
-        if not metrics: continue
+        if not metrics:
+            continue
         
         # Today trends
         t_ind, t_for, t_ins = get_investor_trends(tickers, today_dt, today_dt)
