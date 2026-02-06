@@ -61,7 +61,7 @@ def get_ticker_name(ticker):
 def get_naver_investor_data(ticker_code):
     code = ticker_code.split('.')[0]
     url = f"https://finance.naver.com/item/frgn.naver?code={code}"
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         res = requests.get(url, headers=headers)
         content = res.content.decode('cp949', 'ignore')
@@ -70,8 +70,7 @@ def get_naver_investor_data(ticker_code):
         target_table = None
         for t in tables:
             if '날짜' in t.text:
-                target_table = t
-                break
+                target_table = t; break
         if not target_table: return None
         rows = target_table.find_all('tr')
         data = []
@@ -102,11 +101,11 @@ def get_stats_yf_and_naver(tickers):
     for t in tickers:
         df = get_naver_investor_data(t)
         naver_dfs[t] = df
-        time.sleep(0.1)
+        time.sleep(0.05)
     dates_yf = data.index.strftime("%Y%m%d").tolist()
     def calc_period_metrics(t_list, start_idx, end_idx, base_end_idx):
         prices, volumes = [], []
-        ind_v_sum, for_v_sum, ins_v_sum, total_v_sum = 0, 0, 0, 0
+        ind_v_sum, for_v_sum, ins_v_sum = 0, 0, 0
         start_date_str, end_date_str = dates_yf[start_idx], dates_yf[end_idx]
         for t in t_list:
             tdf = get_ticker_df(t)
@@ -124,7 +123,6 @@ def get_stats_yf_and_naver(tickers):
                         ind_v_sum += period_ndf['개인'].sum()
                         for_v_sum += period_ndf['외국인'].sum()
                         ins_v_sum += period_ndf['기관'].sum()
-                        total_v_sum += period_ndf['거래량'].sum()
             except: continue
         avg_price = sum(prices) / len(prices) if prices else 0
         sum_vol = sum(volumes) if volumes else 0
@@ -140,9 +138,8 @@ def get_sector_news(sector, tickers):
     encoded_query = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     headers = {'User-Agent': 'Mozilla/5.0'}
-    today = datetime.now()
-    yesterday = today - timedelta(days=1)
-    allowed_dates = [today.strftime("%d %b %Y"), yesterday.strftime("%d %b %Y")]
+    today_dt = datetime.now()
+    allowed_dates = [today_dt.strftime("%d %b %Y"), (today_dt - timedelta(days=1)).strftime("%d %b %Y")]
     try:
         res = requests.get(url, headers=headers, timeout=10)
         root = ET.fromstring(res.content)
@@ -154,24 +151,22 @@ def get_sector_news(sector, tickers):
             link = item.find('link').text
             if ' - ' in title: title = title.rsplit(' - ', 1)[0]
             raw_news.append({'title': title, 'link': link, 'recent': is_recent})
-            if len(raw_news) >= 20: break
+            if len(raw_news) >= 30: break
         raw_news.sort(key=lambda x: x['recent'], reverse=True)
-        filtered_news, seen_titles = [], []
+        final_filtered, seen_norm = [], []
         for news in raw_news:
-            is_duplicate = False
-            current_words = set(news['title'].split())
-            for prev_title in seen_titles:
-                prev_words = set(prev_title.split())
-                intersection = current_words.intersection(prev_words)
-                if len(intersection) / max(1, min(len(current_words), len(prev_words))) > 0.5:
-                    is_duplicate = True
-                    break
-            if not is_duplicate:
+            curr_norm = "".join(news['title'].split()).lower()
+            duplicate = False
+            for seen in seen_norm:
+                if curr_norm in seen or seen in curr_norm: duplicate = True; break
+                common = set(curr_norm).intersection(set(seen))
+                if len(common) / max(len(curr_norm), len(seen)) > 0.6: duplicate = True; break
+            if not duplicate:
                 prefix = "🔥 " if news['recent'] else "🕒 "
-                filtered_news.append(f"{prefix}{news['title']} ([링크]({news['link']}))")
-                seen_titles.append(news['title'])
-                if len(filtered_news) >= 3: break
-        return filtered_news if filtered_news else ["- 관련 뉴스가 없습니다."]
+                final_filtered.append(f"{prefix}{news['title']} ([링크]({news['link']}))")
+                seen_norm.append(curr_norm)
+                if len(final_filtered) >= 3: break
+        return final_filtered if final_filtered else ["- 관련 뉴스가 없습니다."]
     except: return ["- 뉴스를 불러오지 못했습니다."]
 
 def generate_summary(df, sector_news):
@@ -193,21 +188,18 @@ def generate_summary(df, sector_news):
     return summary
 
 def main():
-    print("=" * 80)
     print(f"한국 증시 섹터별 종합 리포트 ({datetime.now().strftime('%Y-%m-%d %H:%M')})")
-    print("=" * 80)
     sectors = get_sector_data()
     results, sector_news_dict = [], {}
     for sector, tickers in sectors.items():
         print(f"분석 중: {sector}...")
         metrics = get_stats_yf_and_naver(tickers)
         if not metrics: continue
-        print(f"  - {sector} 뉴스 검색 중...")
         sector_news_dict[sector] = get_sector_news(sector, tickers)
         res = {"섹터": sector, "당일_가격%": metrics["당일"]["가격%"], "당일_거래량": metrics["당일"]["거래량"], "당일_외인": metrics["당일"]["외인"], "당일_기관": metrics["당일"]["기관"], "당일_개인": metrics["당일"]["개인"], "어제_가격%": metrics["어제"]["가격%"], "어제_거래량": metrics["어제"]["거래량"], "어제_외인": metrics["어제"]["외인"], "어제_기관": metrics["어제"]["기관"], "어제_개인": metrics["어제"]["개인"], "주간_가격%": metrics["주간"]["가격%"], "주간_거래량": metrics["주간"]["거래량"], "주간_외인": metrics["주간"]["외인"], "주간_기관": metrics["주간"]["기관"], "주간_개인": metrics["주간"]["개인"]}
         results.append(res)
-    if results: df = pd.DataFrame(results).fillna(0)
-    else: return
+    if not results: return
+    df = pd.DataFrame(results).fillna(0)
     analysis_summary = generate_summary(df, sector_news_dict)
     today_str = datetime.now().strftime('%Y-%m-%d')
     filename = f"reports/report_{today_str}.md"
@@ -219,10 +211,7 @@ def main():
             cols = ["섹터"] + [c for c in df.columns if c.startswith(period)]
             sub_df = df[cols].copy()
             sub_df.columns = [c.replace(f"{period}_", "") for c in sub_df.columns]
-            
-            # 가격 변동률 내림차순, 거래량 내림차순 정렬
             sub_df = sub_df.sort_values(by=["가격%", "거래량"], ascending=False)
-            
             for c in sub_df.columns:
                 if sub_df[c].dtype in ['int64', 'float64'] and c != '가격%':
                     sub_df[c] = sub_df[c].apply(lambda x: f"{int(x):,}")
