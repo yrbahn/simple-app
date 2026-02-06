@@ -7,9 +7,16 @@ def get_low_per_stocks(limit=30):
     """
     최근 확정 실적(보통 직전 연도) 기준 PER이 낮은 종목 TOP 30 추출
     """
-    # 삼성전자 티커를 이용해 최근 영업일 가져오기
     try:
-        latest_date = stock.get_nearest_business_day_in_a_week(datetime.now().strftime("%Y%m%d"))
+        # 삼성전자(005930)의 최근 10일 OHLCV를 가져와서 가장 최근 날짜 확인
+        ohlcv = stock.get_market_ohlcv((datetime.now() - timedelta(days=10)).strftime("%Y%m%d"), 
+                                     datetime.now().strftime("%Y%m%d"), 
+                                     "005930")
+        if ohlcv.empty:
+            print("최근 영업일 정보를 가져올 수 없습니다.")
+            return None
+            
+        latest_date = ohlcv.index[-1].strftime("%Y%m%d")
         print(f"조회 기준일: {latest_date}")
         
         df_kospi = stock.get_market_fundamental(latest_date, market="KOSPI")
