@@ -1,6 +1,6 @@
 from pykrx import stock
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 def get_low_per_stocks(limit=30):
