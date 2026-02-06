@@ -159,11 +159,51 @@ def get_stats_yf_and_naver(tickers):
     # Week (last 5 days) vs 6th day ago Close
     res_w = calc_period_metrics(tickers, -5, -1, -6)
 
-    return {
+    results = {
         "당일": res_t,
         "어제": res_y,
         "주간": res_w
     }
+    return results
+
+def generate_summary(df):
+    """
+    리포트 데이터를 바탕으로 분석 요약을 생성합니다.
+    """
+    summary = "## 📝 시장 분석 요약\n\n"
+    
+    # 1. 주간 최고 상승 섹터
+    weekly_top = df.loc[df['주간_가격%'].idxmax()]
+    summary += f"### 🚀 주간 베스트 섹터: **{weekly_top['섹터']}**\n"
+    summary += f"- 지난 일주일간 평균 **{weekly_top['주간_가격%']}%** 상승하며 가장 강한 흐름을 보였습니다.\n"
+    if weekly_top['주간_외인'] > 0:
+        summary += f"- 외국인이 **{int(weekly_top['주간_외인']):,}주** 순매수하며 상승을 주도했습니다.\n"
+    summary += "\n"
+    
+    # 2. 당일 특이 사항
+    today_up = df[df['당일_가격%'] > 0]
+    if not today_up.empty:
+        top_today = today_up.loc[today_up['당일_가격%'].idxmax()]
+        summary += f"### 📈 당일 강세 섹터: **{top_today['섹터']}**\n"
+        summary += f"- 오늘 시장의 하락 압력 속에서도 **{top_today['당일_가격%']}%** 상승하며 방어력을 보여주었습니다.\n"
+    else:
+        worst_today = df.loc[df['당일_가격%'].idxmin()]
+        summary += f"### 📉 당일 약세 알림\n"
+        summary += f"- 오늘 전반적인 시장 조정세가 나타났으며, 특히 **{worst_today['섹터']}** 섹터가 **{worst_today['당일_가격%']}%** 하락하며 약세를 보였습니다.\n"
+    summary += "\n"
+
+    # 3. 매매 동향 특이사항 (주간 기준)
+    foreigner_buy = df.sort_values(by='주간_외인', ascending=False).iloc[0]
+    if foreigner_buy['주간_외인'] > 0:
+        summary += f"### 💰 외국인 장바구니\n"
+        summary += f"- 외국인은 지난 일주일간 **{foreigner_buy['섹터']}** 섹터를 집중적으로 사들였습니다 (**{int(foreigner_buy['주간_외인']):,}주** 순매수).\n"
+    
+    inst_buy = df.sort_values(by='주간_기관', ascending=False).iloc[0]
+    if inst_buy['주간_기관'] > 0:
+        summary += f"- 기관은 **{inst_buy['섹터']}** 섹터에 대해 우호적인 수급을 보여주었습니다 (**{int(inst_buy['주간_기관']):,}주** 순매수).\n"
+        
+    summary += "\n---"
+    return summary
 
 def main():
     print("=" * 80)
@@ -198,6 +238,9 @@ def main():
         print("데이터를 가져오지 못했습니다.")
         return
     
+    # Generate Summary
+    analysis_summary = generate_summary(df)
+    
     # Markdown Report
     today_str = datetime.now().strftime('%Y-%m-%d')
     filename = f"reports/report_{today_str}.md"
@@ -205,7 +248,11 @@ def main():
     
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"# 한국 증시 섹터별 종합 리포트 ({today_str})\n\n")
-        f.write("## 섹터별 지표 (평균 가격 변동 및 누적 거래량)\n")
+        
+        # Insert Summary here
+        f.write(analysis_summary + "\n\n")
+        
+        f.write("## 📊 섹터별 세부 지표\n")
         f.write("- 가격% : 섹터 내 종목들의 평균 가격 변동률\n")
         f.write("- 거래량 : 해당 기간 섹터 내 종목들의 총 거래량 (주)\n")
         f.write("- 외인/기관/개인 : 해당 기간 섹터 내 종목들의 순매수 수량 합계 (주)\n\n")
@@ -225,6 +272,9 @@ def main():
             f.write("\n\n")
             
         f.write("*이 리포트는 자동 생성되었습니다.*")
+
+    print(f"\n[알림] 마크다운 리포트가 생성되었습니다: {filename}")
+    print(df.to_string(index=False))
 
     print(f"\n[알림] 마크다운 리포트가 생성되었습니다: {filename}")
     print(df.to_string(index=False))
