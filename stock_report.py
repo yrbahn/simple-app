@@ -160,14 +160,18 @@ def get_sector_news(sector, tickers):
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     headers = {'User-Agent': 'Mozilla/5.0'}
     today_dt = datetime.now()
-    allowed_dates = [today_dt.strftime("%d %b %Y"), (today_dt - timedelta(days=1)).strftime("%d %b %Y")]
+    # 리포트 작성 당일 뉴스만 허용
+    allowed_date = today_dt.strftime("%d %b %Y")
     try:
         res = requests.get(url, headers=headers, timeout=10)
         root = ET.fromstring(res.content)
         raw_news = []
         for item in root.findall('.//item'):
             pub_date = item.find('pubDate').text
-            is_recent = any(d in pub_date for d in allowed_dates)
+            # 당일 뉴스인지 확인
+            is_recent = allowed_date in pub_date
+            if not is_recent: continue # 당일 뉴스 아니면 제외
+            
             title = item.find('title').text
             link = item.find('link').text
             if ' - ' in title: title = title.rsplit(' - ', 1)[0]
