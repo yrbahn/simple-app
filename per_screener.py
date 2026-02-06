@@ -7,22 +7,20 @@ def get_low_per_stocks(limit=30):
     """
     최근 확정 실적(보통 직전 연도) 기준 PER이 낮은 종목 TOP 30 추출
     """
-    # 오늘 날짜
-    today = datetime.now().strftime("%Y%m%d")
-    
-    # KOSPI, KOSDAQ 전 종목의 투자지표(PER, PBR 등) 가져오기
-    # get_market_fundamental은 특정 일자의 모든 종목 지표를 반환함
+    # 삼성전자 티커를 이용해 최근 영업일 가져오기
     try:
-        df_kospi = stock.get_market_fundamental(today, market="KOSPI")
-        df_kosdaq = stock.get_market_fundamental(today, market="KOSDAQ")
+        latest_date = stock.get_nearest_business_day_in_a_week(datetime.now().strftime("%Y%m%d"))
+        print(f"조회 기준일: {latest_date}")
+        
+        df_kospi = stock.get_market_fundamental(latest_date, market="KOSPI")
+        df_kosdaq = stock.get_market_fundamental(latest_date, market="KOSDAQ")
         df = pd.concat([df_kospi, df_kosdaq])
-    except:
-        # 주말이나 공휴일일 경우 최근 영업일 데이터 사용
-        print("오늘 데이터를 가져오지 못했습니다. 최근 영업일 데이터를 시도합니다.")
+    except Exception as e:
+        print(f"데이터 조회 실패: {e}")
         return None
 
     # PER이 0인 것은 제외 (영업이익 적자거나 데이터 없는 경우)
-    # 또한 PER이 지나치게 낮은(예: 0.1 미만) 데이터 오류 가능성 종목 필터링
+    # 또한 PER이 지나치게 낮은(예: 0.5 미만) 데이터 오류 가능성 종목 필터링
     df = df[df['PER'] > 0.5]
     
     # PER 기준 오름차순 정렬
