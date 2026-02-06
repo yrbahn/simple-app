@@ -107,14 +107,26 @@ def get_stats_yf_and_naver(tickers):
         prices, volumes = [], []
         ind_v_sum, for_v_sum, ins_v_sum = 0, 0, 0
         start_date_str, end_date_str = dates_yf[start_idx], dates_yf[end_idx]
-        for t in t_list:
+        
+        # 대표 종목(첫 번째) 지표 따로 저장
+        rep_ticker = t_list[0]
+        rep_metrics = {"가격%": 0, "거래량": 0}
+        
+        for i, t in enumerate(t_list):
             tdf = get_ticker_df(t)
             if tdf.empty: continue
             try:
                 curr_p, prev_p = tdf['Close'].iloc[end_idx], tdf['Close'].iloc[base_end_idx]
-                if prev_p > 0: prices.append((curr_p - prev_p) / prev_p * 100)
+                p_change = (curr_p - prev_p) / prev_p * 100 if prev_p > 0 else 0
+                if prev_p > 0: prices.append(p_change)
+                
                 v_sum = tdf['Volume'].iloc[start_idx:end_idx+1 if end_idx != -1 else None].sum()
-                if not pd.isna(v_sum): volumes.append(v_sum)
+                if not pd.isna(v_sum): 
+                    volumes.append(v_sum)
+                    if i == 0: rep_metrics["거래량"] = int(v_sum)
+                
+                if i == 0: rep_metrics["가격%"] = round(p_change, 2)
+                
                 ndf = naver_dfs.get(t)
                 if ndf is not None and not ndf.empty:
                     mask = (ndf['날짜'] >= start_date_str) & (ndf['날짜'] <= end_date_str)
@@ -126,7 +138,16 @@ def get_stats_yf_and_naver(tickers):
             except: continue
         avg_price = sum(prices) / len(prices) if prices else 0
         sum_vol = sum(volumes) if volumes else 0
-        return {"가격%": round(avg_price, 2), "거래량": int(sum_vol), "개인": int(ind_v_sum), "외인": int(for_v_sum), "기관": int(ins_v_sum)}
+        return {
+            "가격%": round(avg_price, 2), 
+            "거래량": int(sum_vol), 
+            "개인": int(ind_v_sum), 
+            "외인": int(for_v_sum), 
+            "기관": int(ins_v_sum),
+            "rep_name": get_ticker_name(rep_ticker),
+            "rep_price%": rep_metrics["가격%"],
+            "rep_vol": rep_metrics["거래량"]
+        }
     res_t = calc_period_metrics(tickers, -1, -1, -2)
     res_y = calc_period_metrics(tickers, -2, -2, -3)
     res_w = calc_period_metrics(tickers, -5, -1, -6)
@@ -171,19 +192,34 @@ def get_sector_news(sector, tickers):
 
 def generate_summary(df, sector_news):
     summary = "## 📝 시장 분석 요약\n\n"
+    
+    # 1. 주간 베스트 & 워스트 섹터
     weekly_top = df.loc[df['주간_가격%'].idxmax()]
-    summary += f"### 🚀 주간 베스트 섹터: **{weekly_top['섹터']}**\n- 지난 일주일간 평균 **{weekly_top['주간_가격%']}%** 상승하며 가장 강한 흐름을 보였습니다.\n\n"
+    weekly_worst = df.loc[df['주간_가격%'].idxmin()]
+    
+    summary += f"### 🚀 주간 베스트 섹터: **{weekly_top['섹터']}**\n"
+    summary += f"- 지난 일주일간 평균 **{weekly_top['주간_가격%']}%** 상승하며 가장 강한 흐름을 보였습니다.\n"
+    summary += f"- 대표 종목 **{weekly_top['rep_name']}**: 주간 변동률 **{weekly_top['주간_rep_price%']}%**, 누적 거래량 **{int(weekly_top['주간_rep_vol']):,}주**\n\n"
+    
+    summary += f"### 📉 주간 워스트 섹터: **{weekly_worst['섹터']}**\n"
+    summary += f"- 지난 일주일간 평균 **{weekly_worst['주간_가격%']}%** 하락하며 가장 부진한 모습이었습니다.\n"
+    summary += f"- 대표 종목 **{weekly_worst['rep_name']}**: 주간 변동률 **{weekly_worst['주간_rep_price%']}%**, 누적 거래량 **{int(weekly_worst['주간_rep_vol']):,}주**\n\n"
+    
+    # 2. 당일 특이 사항
     today_up = df[df['당일_가격%'] > 0]
     if not today_up.empty:
         top_today = today_up.loc[today_up['당일_가격%'].idxmax()]
-        summary += f"### 📈 당일 강세 섹터: **{top_today['섹터']}**\n- 오늘 시장에서 **{top_today['당일_가격%']}%** 상승하며 주목받았습니다.\n\n"
+        summary += f"### 📈 당일 강세 섹터: **{top_today['섹터']}**\n- 오늘 시장에서 **{top_today['당일_가격%']}%** 상승하며 주목받았습니다. (대표 종목 {top_today['rep_name']} {top_today['당일_rep_price%']}%)\n\n"
     else:
         worst_today = df.loc[df['당일_가격%'].idxmin()]
-        summary += f"### 📉 당일 시장 동향\n- 전반적으로 약세장이었으며, **{worst_today['섹터']}** 섹터의 하락폭이 컸습니다.\n\n"
+        summary += f"### 📉 당일 시장 동향\n- 전반적으로 약세장이었으며, **{worst_today['섹터']}** 섹터의 하락폭이 컸습니다. (대표 종목 {worst_today['rep_name']} {worst_today['당일_rep_price%']}%)\n\n"
+    
     summary += "### 📰 주요 섹터 뉴스 요약\n"
     for sector in ["반도체", "이차전지", "자동차", "로봇", "AI/SW"]:
         if sector in sector_news:
-            summary += f"**[{sector}]**\n" + "\n".join(sector_news[sector][:2]) + "\n\n"
+            news_list = sector_news[sector][:2]
+            formatted_news = "\n".join(news_list)
+            summary += f"**[{sector}]**\n{formatted_news}\n\n"
     summary += "\n---"
     return summary
 
@@ -196,7 +232,23 @@ def main():
         metrics = get_stats_yf_and_naver(tickers)
         if not metrics: continue
         sector_news_dict[sector] = get_sector_news(sector, tickers)
-        res = {"섹터": sector, "당일_가격%": metrics["당일"]["가격%"], "당일_거래량": metrics["당일"]["거래량"], "당일_외인": metrics["당일"]["외인"], "당일_기관": metrics["당일"]["기관"], "당일_개인": metrics["당일"]["개인"], "어제_가격%": metrics["어제"]["가격%"], "어제_거래량": metrics["어제"]["거래량"], "어제_외인": metrics["어제"]["외인"], "어제_기관": metrics["어제"]["기관"], "어제_개인": metrics["어제"]["개인"], "주간_가격%": metrics["주간"]["가격%"], "주간_거래량": metrics["주간"]["거래량"], "주간_외인": metrics["주간"]["외인"], "주간_기관": metrics["주간"]["기관"], "주간_개인": metrics["주간"]["개인"]}
+        
+        res = {
+            "섹터": sector,
+            "당일_가격%": metrics["당일"]["가격%"], "당일_거래량": metrics["당일"]["거래량"],
+            "당일_외인": metrics["당일"]["외인"], "당일_기관": metrics["당일"]["기관"], "당일_개인": metrics["당일"]["개인"],
+            "당일_rep_price%": metrics["당일"]["rep_price%"], "당일_rep_vol": metrics["당일"]["rep_vol"],
+            
+            "어제_가격%": metrics["어제"]["가격%"], "어제_거래량": metrics["어제"]["거래량"],
+            "어제_외인": metrics["어제"]["외인"], "어제_기관": metrics["어제"]["기관"], "어제_개인": metrics["어제"]["개인"],
+            "어제_rep_price%": metrics["어제"]["rep_price%"], "어제_rep_vol": metrics["어제"]["rep_vol"],
+            
+            "주간_가격%": metrics["주간"]["가격%"], "주간_거래량": metrics["주간"]["거래량"],
+            "주간_외인": metrics["주간"]["외인"], "주간_기관": metrics["주간"]["기관"], "주간_개인": metrics["주간"]["개인"],
+            "주간_rep_price%": metrics["주간"]["rep_price%"], "주간_rep_vol": metrics["주간"]["rep_vol"],
+            
+            "rep_name": metrics["당일"]["rep_name"]
+        }
         results.append(res)
     if not results: return
     df = pd.DataFrame(results).fillna(0)
