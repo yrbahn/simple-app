@@ -219,6 +219,10 @@ def main():
             cols = ["섹터"] + [c for c in df.columns if c.startswith(period)]
             sub_df = df[cols].copy()
             sub_df.columns = [c.replace(f"{period}_", "") for c in sub_df.columns]
+            
+            # 가격 변동률 내림차순, 거래량 내림차순 정렬
+            sub_df = sub_df.sort_values(by=["가격%", "거래량"], ascending=False)
+            
             for c in sub_df.columns:
                 if sub_df[c].dtype in ['int64', 'float64'] and c != '가격%':
                     sub_df[c] = sub_df[c].apply(lambda x: f"{int(x):,}")
