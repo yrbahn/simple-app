@@ -206,6 +206,15 @@ def main():
             for c in sub_df.columns:
                 if sub_df[c].dtype in ['int64', 'float64'] and c not in ['가격%', '상승비율%']: sub_df[c] = sub_df[c].apply(lambda x: f"{int(x):,}")
             f.write(sub_df.to_markdown(index=False) + "\n\n")
+            
+            # 섹터별 포함 종목 리스트 추가
+            f.write("<details><summary>🔎 섹터별 포함 종목 보기</summary>\n\n")
+            for sector in sub_df["섹터"]:
+                tickers = get_sector_data().get(sector, [])
+                names = [get_ticker_name(t) for t in tickers]
+                f.write(f"- **{sector}**: {', '.join(names)}\n")
+            f.write("\n</details>\n\n")
+
         f.write("## 🔍 섹터별 주요 뉴스 전체 보기\n\n")
         for sector, news in sector_news_dict.items():
             f.write(f"### {sector}\n" + "\n".join(news) + "\n\n")
