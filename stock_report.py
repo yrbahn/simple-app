@@ -74,14 +74,27 @@ def main():
             
     if reports:
         report_df = pd.DataFrame(reports)
-        # 컬럼 순서 조정
         cols = ['Sector', 'Name', 'Ticker', 'Start Price', 'End Price', 'Change (%)', 'Volatility (%)']
         report_df = report_df[cols]
-        
-        # 한국어 출력을 위해 컬럼명 변경
         report_df.columns = ['섹터', '종목명', '티커', '시작가', '현재가', '변동률(%)', '변동성(%)']
         
+        # 터미널 출력
         print(report_df.to_string(index=False))
+        
+        # 마크다운 파일 저장
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        filename = f"reports/report_{today_str}.md"
+        
+        import os
+        os.makedirs("reports", exist_ok=True)
+        
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(f"# 주식 시장 리포트 ({today_str})\n\n")
+            f.write("## 한국 증시 주요 섹터 대장주 최근 7일 변동 현황\n\n")
+            f.write(report_df.to_markdown(index=False))
+            f.write("\n\n*이 리포트는 자동 생성되었습니다.*")
+            
+        print(f"\n[알림] 마크다운 리포트가 생성되었습니다: {filename}")
     else:
         print("데이터를 가져오지 못했습니다.")
         
