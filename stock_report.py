@@ -151,14 +151,17 @@ def get_stats_yf_and_naver(tickers):
             "기관": int(ins_v_sum)
         }
 
-    # Results: Only Today and Weekly
+    # Results: Today, Yesterday, and Weekly
     # Today vs Yesterday Close
     res_t = calc_period_metrics(tickers, -1, -1, -2)
+    # Yesterday vs Day Before yesterday Close
+    res_y = calc_period_metrics(tickers, -2, -2, -3)
     # Week (last 5 days) vs 6th day ago Close
     res_w = calc_period_metrics(tickers, -5, -1, -6)
 
     return {
         "당일": res_t,
+        "어제": res_y,
         "주간": res_w
     }
 
@@ -180,6 +183,9 @@ def main():
             "섹터": sector,
             "당일_가격%": metrics["당일"]["가격%"], "당일_거래량": metrics["당일"]["거래량"],
             "당일_외인": metrics["당일"]["외인"], "당일_기관": metrics["당일"]["기관"], "당일_개인": metrics["당일"]["개인"],
+            
+            "어제_가격%": metrics["어제"]["가격%"], "어제_거래량": metrics["어제"]["거래량"],
+            "어제_외인": metrics["어제"]["외인"], "어제_기관": metrics["어제"]["기관"], "어제_개인": metrics["어제"]["개인"],
             
             "주간_가격%": metrics["주간"]["가격%"], "주간_거래량": metrics["주간"]["거래량"],
             "주간_외인": metrics["주간"]["외인"], "주간_기관": metrics["주간"]["기관"], "주간_개인": metrics["주간"]["개인"]
@@ -204,7 +210,7 @@ def main():
         f.write("- 거래량 : 해당 기간 섹터 내 종목들의 총 거래량 (주)\n")
         f.write("- 외인/기관/개인 : 해당 기간 섹터 내 종목들의 순매수 수량 합계 (주)\n\n")
         
-        for period in ["당일", "주간"]:
+        for period in ["당일", "어제", "주간"]:
             f.write(f"### {period} 리포트\n\n")
             cols = ["섹터"] + [c for c in df.columns if c.startswith(period)]
             sub_df = df[cols].copy()
