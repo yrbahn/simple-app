@@ -256,7 +256,8 @@ def generate_summary(df, sector_news):
     for sector in ["반도체", "이차전지", "자동차", "금융"]: # 주요 섹터만 요약 노출
         if sector in sector_news:
             summary += f"**[{sector}]**\n"
-            summary += "\n".join(sector_news[sector][:2]) + "\n"
+            summary += "\n".join(sector_news[sector][:2])
+            summary += "\n\n" # 섹터 간 구분을 위한 빈 줄 추가
     
     summary += "\n---"
     return summary
