@@ -171,24 +171,37 @@ import urllib.parse
 
 def get_sector_news(sector):
     """
-    섹터별 주요 뉴스를 가져오되, 유사한 제목의 중복 뉴스를 필터링합니다.
+    섹터별 주요 뉴스를 가져오되, 리포트 작성일(오늘) 기준의 뉴스만 필터링합니다.
+    유사한 제목의 중복 뉴스도 제거합니다.
     """
     query = f"{sector} 주식 뉴스"
     encoded_query = urllib.parse.quote(query)
     url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
     headers = {'User-Agent': 'Mozilla/5.0'}
     
+    # 오늘 날짜 (문자열 비교용) - 예: "06 Feb 2026"
+    today = datetime.now()
+    today_str = today.strftime("%d %b %Y") 
+    
     try:
         res = requests.get(url, headers=headers, timeout=10)
         root = ET.fromstring(res.content)
         
         raw_news = []
-        for item in root.findall('.//item')[:10]: # 일단 10개를 가져와서 필터링
+        for item in root.findall('.//item'):
+            pub_date = item.find('pubDate').text
+            # Google News RSS pubDate format: "Fri, 06 Feb 2026 07:10:00 GMT"
+            # 오늘 뉴스인지 확인 (날짜 부분만 추출하여 비교)
+            if today_str not in pub_date:
+                continue
+                
             title = item.find('title').text
             link = item.find('link').text
             if ' - ' in title:
                 title = title.rsplit(' - ', 1)[0]
             raw_news.append({'title': title, 'link': link})
+            if len(raw_news) >= 15: # 충분히 확보 후 필터링
+                break
             
         # 중복/유사 제목 필터링 로직
         filtered_news = []
@@ -196,24 +209,22 @@ def get_sector_news(sector):
         
         for news in raw_news:
             is_duplicate = False
-            # 공백 기준 단어 집합 생성 (간단한 유사도 검사)
             current_words = set(news['title'].split())
             
             for prev_title in seen_titles:
                 prev_words = set(prev_title.split())
-                # 공통 단어 비율 계산 (Jaccard 유사도 개념 차용)
                 intersection = current_words.intersection(prev_words)
-                if len(intersection) / min(len(current_words), len(prev_words)) > 0.5: # 50% 이상 겹치면 중복 간주
+                if len(intersection) / max(1, min(len(current_words), len(prev_words))) > 0.5:
                     is_duplicate = True
                     break
             
             if not is_duplicate:
                 filtered_news.append(f"- {news['title']} ([링크]({news['link']}))")
                 seen_titles.append(news['title'])
-                if len(filtered_news) >= 3: # 최종적으로 3개만 유지
+                if len(filtered_news) >= 3:
                     break
                     
-        return filtered_news if filtered_news else ["- 관련 뉴스가 없습니다."]
+        return filtered_news if filtered_news else ["- 오늘 등록된 주요 뉴스가 없습니다."]
     except:
         return ["- 뉴스를 불러오지 못했습니다."]
 
