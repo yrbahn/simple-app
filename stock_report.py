@@ -91,21 +91,19 @@ def get_stats_yf_and_naver(tickers):
                 return pd.DataFrame()
         return data
 
-    # Pre-fetch Naver data for all tickers to avoid multiple requests in inner loop
+    # Pre-fetch Naver data
     naver_dfs = {}
     for t in tickers:
         df = get_naver_investor_data(t)
         naver_dfs[t] = df
-        time.sleep(0.1) # 매너 크롤링
+        time.sleep(0.1)
 
     dates_yf = data.index.strftime("%Y%m%d").tolist()
     
-    def calc_period_metrics(t_list, start_idx, end_idx, base_start_idx, base_end_idx):
+    def calc_period_metrics(t_list, start_idx, end_idx, base_end_idx):
         prices = []
         volumes = []
-        base_volumes = []
         
-        # Investor trends (sum over the period)
         ind_v_sum, for_v_sum, ins_v_sum, total_v_sum = 0, 0, 0, 0
         
         start_date_str = dates_yf[start_idx]
@@ -116,27 +114,22 @@ def get_stats_yf_and_naver(tickers):
             if tdf.empty: continue
             
             try:
-                # Price & Volume from yfinance
+                # Price change: (End Close - Base Close) / Base Close
                 curr_p = tdf['Close'].iloc[end_idx]
                 prev_p = tdf['Close'].iloc[base_end_idx]
                 if prev_p > 0:
                     prices.append((curr_p - prev_p) / prev_p * 100)
                 
+                # Absolute Volume for the period
                 s = start_idx
                 e = end_idx + 1 if end_idx != -1 else None
-                cv = tdf['Volume'].iloc[s:e].mean()
-                
-                bs = base_start_idx
-                be = base_end_idx + 1 if base_end_idx != -1 else None
-                pv = tdf['Volume'].iloc[bs:be].mean()
-                
-                if not pd.isna(cv): volumes.append(cv)
-                if not pd.isna(pv): base_volumes.append(pv)
+                v_sum = tdf['Volume'].iloc[s:e].sum()
+                if not pd.isna(v_sum):
+                    volumes.append(v_sum)
                 
                 # Investor data from Naver
                 ndf = naver_dfs.get(t)
                 if ndf is not None and not ndf.empty:
-                    # Filter for period
                     mask = (ndf['날짜'] >= start_date_str) & (ndf['날짜'] <= end_date_str)
                     period_ndf = ndf.loc[mask]
                     if not period_ndf.empty:
@@ -148,34 +141,24 @@ def get_stats_yf_and_naver(tickers):
                 continue
         
         avg_price = sum(prices) / len(prices) if prices else 0
-        avg_vol_inc = 0
-        if volumes and base_volumes:
-            cv = sum(volumes) / len(volumes)
-            bv = sum(base_volumes) / len(base_volumes)
-            if bv > 0:
-                avg_vol_inc = (cv - bv) / bv * 100
-        
-        # Investor rates
-        ind_rate = (ind_v_sum / total_v_sum * 100) if total_v_sum > 0 else 0
-        for_rate = (for_v_sum / total_v_sum * 100) if total_v_sum > 0 else 0
-        ins_rate = (ins_v_sum / total_v_sum * 100) if total_v_sum > 0 else 0
+        sum_vol = sum(volumes) if volumes else 0
         
         return {
             "가격%": round(avg_price, 2),
-            "거래%": round(avg_vol_inc, 2),
-            "개인%": round(ind_rate, 2),
-            "외인%": round(for_rate, 2),
-            "기관%": round(ins_rate, 2)
+            "거래량": int(sum_vol),
+            "개인": int(ind_v_sum),
+            "외인": int(for_v_sum),
+            "기관": int(ins_v_sum)
         }
 
-    # Results
-    res_t = calc_period_metrics(tickers, -1, -1, -2, -2)
-    res_y = calc_period_metrics(tickers, -2, -2, -3, -3)
-    res_w = calc_period_metrics(tickers, -5, -1, -10, -6)
+    # Results: Only Today and Weekly
+    # Today vs Yesterday Close
+    res_t = calc_period_metrics(tickers, -1, -1, -2)
+    # Week (last 5 days) vs 6th day ago Close
+    res_w = calc_period_metrics(tickers, -5, -1, -6)
 
     return {
         "당일": res_t,
-        "어제": res_y,
         "주간": res_w
     }
 
@@ -195,14 +178,11 @@ def main():
         
         res = {
             "섹터": sector,
-            "당일_가격%": metrics["당일"]["가격%"], "당일_거래%": metrics["당일"]["거래%"],
-            "당일_외인%": metrics["당일"]["외인%"], "당일_기관%": metrics["당일"]["기관%"], "당일_개인%": metrics["당일"]["개인%"],
+            "당일_가격%": metrics["당일"]["가격%"], "당일_거래량": metrics["당일"]["거래량"],
+            "당일_외인": metrics["당일"]["외인"], "당일_기관": metrics["당일"]["기관"], "당일_개인": metrics["당일"]["개인"],
             
-            "어제_가격%": metrics["어제"]["가격%"], "어제_거래%": metrics["어제"]["거래%"],
-            "어제_외인%": metrics["어제"]["외인%"], "어제_기관%": metrics["어제"]["기관%"], "어제_개인%": metrics["어제"]["개인%"],
-            
-            "주간_가격%": metrics["주간"]["가격%"], "주간_거래%": metrics["주간"]["거래%"],
-            "주간_외인%": metrics["주간"]["외인%"], "주간_기관%": metrics["주간"]["기관%"], "주간_개인%": metrics["주간"]["개인%"]
+            "주간_가격%": metrics["주간"]["가격%"], "주간_거래량": metrics["주간"]["거래량"],
+            "주간_외인": metrics["주간"]["외인"], "주간_기관": metrics["주간"]["기관"], "주간_개인": metrics["주간"]["개인"]
         }
         results.append(res)
         
@@ -219,16 +199,22 @@ def main():
     
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"# 한국 증시 섹터별 종합 리포트 ({today_str})\n\n")
-        f.write("## 섹터별 평균 지표 및 매매동향\n")
+        f.write("## 섹터별 지표 (평균 가격 변동 및 누적 거래량)\n")
         f.write("- 가격% : 섹터 내 종목들의 평균 가격 변동률\n")
-        f.write("- 거래% : 전일(또는 전주) 대비 평균 거래량 변동률\n")
-        f.write("- 매매동향률 : (순매수수량 / 거래량) * 100\n\n")
+        f.write("- 거래량 : 해당 기간 섹터 내 종목들의 총 거래량 (주)\n")
+        f.write("- 외인/기관/개인 : 해당 기간 섹터 내 종목들의 순매수 수량 합계 (주)\n\n")
         
-        for period in ["당일", "어제", "주간"]:
+        for period in ["당일", "주간"]:
             f.write(f"### {period} 리포트\n\n")
             cols = ["섹터"] + [c for c in df.columns if c.startswith(period)]
             sub_df = df[cols].copy()
             sub_df.columns = [c.replace(f"{period}_", "") for c in sub_df.columns]
+            # Format large numbers with commas
+            for c in sub_df.columns:
+                if sub_df[c].dtype == 'int64' or sub_df[c].dtype == 'float64':
+                    if c != '가격%':
+                        sub_df[c] = sub_df[c].apply(lambda x: f"{int(x):,}")
+            
             f.write(sub_df.to_markdown(index=False))
             f.write("\n\n")
             
