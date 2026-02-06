@@ -104,8 +104,16 @@ def main():
         
     if results:
         res_df = pd.DataFrame(results)
+        # 컬럼 순서 및 이름 변경
+        res_df = res_df.rename(columns={
+            '종목명': '종목명',
+            '영업이익기준PER': '영업이익PER',
+            '시가총액(억)': '시가총액(억)',
+            '최근4분기영익합계(억)': '4분기영익합계(억)'
+        })
+        
         # PER 0.5 미만 이상치 제거 및 상위 50개 선정
-        top_50 = res_df[res_df['영업이익기준PER'] > 0.5].sort_values(by='영업이익기준PER').head(50)
+        top_50 = res_df[res_df['영업이익PER'] > 0.5].sort_values(by='영업이익PER').head(50)
         
         today_str = datetime.now().strftime('%Y-%m-%d')
         filename = f"reports/per_screener_{today_str}.md"
@@ -114,11 +122,10 @@ def main():
         with open(filename, "w", encoding="utf-8") as f:
             f.write(f"# 4분기 합산 영업이익 기반 저PER 종목 리포트 ({today_str})\n\n")
             f.write("## 📉 지난 4개 분기 실적 합계 기준 저평가 TOP 50\n\n")
-            f.write("본 리포트는 당기순이익 대신 **지난 4개 분기의 실제 영업이익 합계**를 기준으로 PER을 계산했습니다.\n\n")
-            f.write("### 📊 주요 지표 안내\n")
-            f.write("- **시가총액 / 최근4분기영익합계 단위:** 억 원\n")
-            f.write("- **영업이익기준PER 계산식:** 시가총액 / (지난 4개 분기 영업이익 합계)\n")
-            f.write("- **대상:** 시총 상위 250개 종목 중 영업이익 흑자 기업\n\n")
+            f.write("본 리포트는 당기순이익 대신 **최근 4개 분기의 실제 영업이익 합계**를 기준으로 PER을 계산했습니다.\n\n")
+            f.write("### 📊 수식 및 단위\n")
+            f.write("- **모든 금액 단위:** 억 원\n")
+            f.write("- **영업이익PER:** 시가총액 / (최근 4개 분기 영업이익 합계)\n\n")
             f.write(top_50.to_markdown(index=False))
             f.write("\n\n*본 리포트는 네이버 금융 데이터를 기반으로 자동 생성되었습니다.*")
             
