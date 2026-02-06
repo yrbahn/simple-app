@@ -166,9 +166,37 @@ def get_stats_yf_and_naver(tickers):
     }
     return results
 
-def generate_summary(df):
+import xml.etree.ElementTree as ET
+import urllib.parse
+
+def get_sector_news(sector):
     """
-    리포트 데이터를 바탕으로 분석 요약을 생성합니다.
+    섹터별 주요 뉴스를 Google News RSS에서 가져옵니다.
+    """
+    query = f"{sector} 주식 뉴스"
+    encoded_query = urllib.parse.quote(query)
+    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        root = ET.fromstring(res.content)
+        
+        news_items = []
+        for item in root.findall('.//item')[:3]:
+            title = item.find('title').text
+            link = item.find('link').text
+            # 출처 분리 (보통 '제목 - 언론사' 형식)
+            if ' - ' in title:
+                title = title.rsplit(' - ', 1)[0]
+            news_items.append(f"- {title} ([링크]({link}))")
+        return news_items
+    except:
+        return ["- 뉴스를 불러오지 못했습니다."]
+
+def generate_summary(df, sector_news):
+    """
+    리포트 데이터와 뉴스를 바탕으로 분석 요약을 생성합니다.
     """
     summary = "## 📝 시장 분석 요약\n\n"
     
@@ -176,32 +204,26 @@ def generate_summary(df):
     weekly_top = df.loc[df['주간_가격%'].idxmax()]
     summary += f"### 🚀 주간 베스트 섹터: **{weekly_top['섹터']}**\n"
     summary += f"- 지난 일주일간 평균 **{weekly_top['주간_가격%']}%** 상승하며 가장 강한 흐름을 보였습니다.\n"
-    if weekly_top['주간_외인'] > 0:
-        summary += f"- 외국인이 **{int(weekly_top['주간_외인']):,}주** 순매수하며 상승을 주도했습니다.\n"
-    summary += "\n"
     
     # 2. 당일 특이 사항
     today_up = df[df['당일_가격%'] > 0]
     if not today_up.empty:
         top_today = today_up.loc[today_up['당일_가격%'].idxmax()]
         summary += f"### 📈 당일 강세 섹터: **{top_today['섹터']}**\n"
-        summary += f"- 오늘 시장의 하락 압력 속에서도 **{top_today['당일_가격%']}%** 상승하며 방어력을 보여주었습니다.\n"
+        summary += f"- 오늘 시장에서 **{top_today['당일_가격%']}%** 상승하며 주목받았습니다.\n"
     else:
         worst_today = df.loc[df['당일_가격%'].idxmin()]
-        summary += f"### 📉 당일 약세 알림\n"
-        summary += f"- 오늘 전반적인 시장 조정세가 나타났으며, 특히 **{worst_today['섹터']}** 섹터가 **{worst_today['당일_가격%']}%** 하락하며 약세를 보였습니다.\n"
+        summary += f"### 📉 당일 시장 동향\n"
+        summary += f"- 전반적으로 약세장이었으며, **{worst_today['섹터']}** 섹터의 하락폭이 컸습니다.\n"
     summary += "\n"
 
-    # 3. 매매 동향 특이사항 (주간 기준)
-    foreigner_buy = df.sort_values(by='주간_외인', ascending=False).iloc[0]
-    if foreigner_buy['주간_외인'] > 0:
-        summary += f"### 💰 외국인 장바구니\n"
-        summary += f"- 외국인은 지난 일주일간 **{foreigner_buy['섹터']}** 섹터를 집중적으로 사들였습니다 (**{int(foreigner_buy['주간_외인']):,}주** 순매수).\n"
+    # 3. 섹터별 주요 뉴스 요약
+    summary += "### 📰 섹터별 주요 뉴스\n"
+    for sector in ["반도체", "이차전지", "자동차", "금융"]: # 주요 섹터만 요약 노출
+        if sector in sector_news:
+            summary += f"**[{sector}]**\n"
+            summary += "\n".join(sector_news[sector][:2]) + "\n"
     
-    inst_buy = df.sort_values(by='주간_기관', ascending=False).iloc[0]
-    if inst_buy['주간_기관'] > 0:
-        summary += f"- 기관은 **{inst_buy['섹터']}** 섹터에 대해 우호적인 수급을 보여주었습니다 (**{int(inst_buy['주간_기관']):,}주** 순매수).\n"
-        
     summary += "\n---"
     return summary
 
@@ -212,12 +234,17 @@ def main():
     
     sectors = get_sector_data()
     results = []
+    sector_news_dict = {}
     
     for sector, tickers in sectors.items():
         print(f"분석 중: {sector}...")
         metrics = get_stats_yf_and_naver(tickers)
         if not metrics:
             continue
+        
+        # 뉴스 가져오기
+        print(f"  - {sector} 뉴스 검색 중...")
+        sector_news_dict[sector] = get_sector_news(sector)
         
         res = {
             "섹터": sector,
@@ -238,8 +265,8 @@ def main():
         print("데이터를 가져오지 못했습니다.")
         return
     
-    # Generate Summary
-    analysis_summary = generate_summary(df)
+    # Generate Summary with News
+    analysis_summary = generate_summary(df, sector_news_dict)
     
     # Markdown Report
     today_str = datetime.now().strftime('%Y-%m-%d')
@@ -249,7 +276,6 @@ def main():
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"# 한국 증시 섹터별 종합 리포트 ({today_str})\n\n")
         
-        # Insert Summary here
         f.write(analysis_summary + "\n\n")
         
         f.write("## 📊 섹터별 세부 지표\n")
@@ -262,7 +288,6 @@ def main():
             cols = ["섹터"] + [c for c in df.columns if c.startswith(period)]
             sub_df = df[cols].copy()
             sub_df.columns = [c.replace(f"{period}_", "") for c in sub_df.columns]
-            # Format large numbers with commas
             for c in sub_df.columns:
                 if sub_df[c].dtype == 'int64' or sub_df[c].dtype == 'float64':
                     if c != '가격%':
@@ -271,7 +296,16 @@ def main():
             f.write(sub_df.to_markdown(index=False))
             f.write("\n\n")
             
+        # Add All News at the end
+        f.write("## 🔍 섹터별 주요 뉴스 전체 보기\n\n")
+        for sector, news in sector_news_dict.items():
+            f.write(f"### {sector}\n")
+            f.write("\n".join(news) + "\n\n")
+            
         f.write("*이 리포트는 자동 생성되었습니다.*")
+
+    print(f"\n[알림] 마크다운 리포트가 생성되었습니다: {filename}")
+    print(df.to_string(index=False))
 
     print(f"\n[알림] 마크다운 리포트가 생성되었습니다: {filename}")
     print(df.to_string(index=False))
