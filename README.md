@@ -12,18 +12,22 @@
 ## 포함된 프로그램
 
 - `stock_report.py`: 주가 데이터를 가져와서 분석하고 리포트를 생성하는 메인 프로그램입니다.
+- `per_screener.py`: 한국 증시 전 종목 중 최근 영업이익 기준 PER이 가장 낮은 TOP 30 종목을 추출하는 프로그램입니다.
 
 ## 실행 방법
 
 필요한 라이브러리 설치:
 ```bash
-pip install yfinance pandas requests tabulate
+pip install yfinance pandas requests tabulate pykrx lxml
 ```
 
 리포트 실행:
 ```bash
 python stock_report.py
+python per_screener.py
 ```
 
 ## 생성된 리포트 확인
 `reports/` 폴더에서 날짜별로 생성된 마크다운 파일을 확인할 수 있습니다.
+- `report_YYYY-MM-DD.md`: 섹터별 종합 분석 리포트
+- `per_screener_YYYY-MM-DD.md`: 저PER 종목 스크리닝 리포트
