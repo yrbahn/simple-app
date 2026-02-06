@@ -1,91 +1,78 @@
-import pandas as pd
-from pykrx import stock
-from datetime import datetime, timedelta
-import os
 import requests
-from bs4 import BeautifulSoup
+import pandas as pd
+from datetime import datetime
+import os
+import time
 
-def get_low_per_stocks_crawling(limit=30):
+def get_naver_per_ranking(page=1):
     """
-    Naver Finance의 '배당' 랭킹 등을 활용하거나 직접 종목 리스트를 순회하며 
-    Fundamental 지표가 유효한 종목 중 PER이 낮은 순으로 추출합니다.
-    (pykrx의 bulk API가 현재 환경에서 불안정하여 개별 조회를 병행하는 안전한 방식을 사용)
+    네이버 금융의 상위 종목(시가총액 순) 페이지에서 PER 데이터를 수집합니다.
     """
+    url = f"https://finance.naver.com/sise/sise_market_sum.naver?&page={page}"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
     try:
-        # 최근 영업일 구하기
-        ohlcv = stock.get_market_ohlcv((datetime.now() - timedelta(days=10)).strftime("%Y%m%d"), 
-                                     datetime.now().strftime("%Y%m%d"), 
-                                     "005930")
-        if ohlcv.empty: return None
-        latest_date = ohlcv.index[-1].strftime("%Y%m%d")
-        print(f"조회 기준일: {latest_date}")
-
-        # 1. KOSPI, KOSDAQ 상위 종목 리스트 확보
-        tickers = stock.get_market_ticker_list(latest_date, market="ALL")
+        res = requests.get(url, headers=headers)
+        # 네이버 금융은 EUC-KR 사용
+        df_list = pd.read_html(res.content.decode('cp949', 'ignore'))
+        # 시가총액 테이블은 보통 리스트의 두 번째(index 1)에 위치함
+        df = df_list[1]
         
-        # 2. 전체 종목의 Fundamental 지표 가져오기 시도
-        # (bulk API가 에러 날 경우를 대비해 try-except)
-        try:
-            df = stock.get_market_fundamental_by_ticker(latest_date, market="ALL")
-        except:
-            # 벌크 조회가 실패할 경우, 시총 상위 500개 정도만이라도 개별 조회하여 리포트 구성
-            print("벌크 조회 실패. 상위 종목 개별 분석으로 전환합니다.")
-            cap_df = stock.get_market_cap_by_ticker(latest_date)
-            top_tickers = cap_df.sort_values(by='시가총액', ascending=False).head(500).index
-            
-            data = []
-            for t in top_tickers:
-                try:
-                    f_df = stock.get_market_fundamental(latest_date, latest_date, t)
-                    if not f_df.empty:
-                        row = f_df.iloc[-1]
-                        if row['PER'] > 0.5:
-                            data.append({'티커': t, 'PER': row['PER'], 'PBR': row['PBR'], '배당수익률': row['DIV'], 'EPS': row['EPS']})
-                except: continue
-            df = pd.DataFrame(data).set_index('티커')
-
-        if df.empty: return None
+        # 불필요한 로우 제거 (구분선 등)
+        df = df[df['종목명'].notna()]
         
-        # PER 0.5 미만(이상치) 및 0(적자/데이터없음) 제외
-        df = df[df['PER'] > 0.5]
-        df_sorted = df.sort_values(by='PER', ascending=True)
+        # 필요한 컬럼만 추출
+        # 네이버 테이블 컬럼: N, 종목명, 현재가, 전일비, 등락률, 액면가, 시가총액, 상장주식수, 외국인비율, 거래량, PER, ROE
+        cols = ['종목명', 'PER', '시가총액', '현재가']
+        available_cols = [c for c in cols if c in df.columns]
+        df = df[available_cols]
         
-        top_df = df_sorted.head(limit).copy()
-        top_df['종목명'] = [stock.get_market_ticker_name(ticker) for ticker in top_df.index]
-        
-        # 컬럼 존재 여부 확인 후 정리
-        cols = ['종목명', 'PER', 'PBR', '배당수익률', 'EPS']
-        available_cols = [c for c in cols if c in top_df.columns]
-        if 'DIV' in top_df.columns: # pykrx 버전에 따라 DIV/배당수익률 이름이 다를 수 있음
-            top_df = top_df.rename(columns={'DIV': '배당수익률'})
-            
-        return top_df[available_cols]
+        return df
     except Exception as e:
-        print(f"오류 발생: {e}")
+        print(f"네이버 데이터 수집 오류 (Page {page}): {e}")
         return None
 
 def main():
-    print("저PER 종목 스크리닝 중 (약 1~2분 소요될 수 있습니다)...")
-    top_30 = get_low_per_stocks_crawling(30)
+    print("네이버 금융 데이터를 통한 저PER 종목 스크리닝 중...")
     
-    if top_30 is None or top_30.empty:
-        print("유효한 데이터를 찾지 못했습니다.")
+    all_data = []
+    # 시가총액 상위 500개 종목 분석 (페이지당 50개씩 10페이지)
+    for p in range(1, 11):
+        print(f"페이지 {p} 분석 중...", end='\r')
+        df = get_naver_per_ranking(p)
+        if df is not None:
+            all_data.append(df)
+        time.sleep(0.1)
+    
+    if not all_data:
+        print("데이터를 가져오는 데 실패했습니다.")
         return
-
+        
+    full_df = pd.concat(all_data)
+    
+    # PER 컬럼 수치화
+    full_df['PER'] = pd.to_numeric(full_df['PER'], errors='coerce')
+    
+    # PER이 유효한(0보다 큰) 종목만 필터링 및 0.5 미만 이상치 제거
+    filtered_df = full_df[full_df['PER'] > 0.5].copy()
+    
+    # PER 낮은 순 정렬
+    top_30 = filtered_df.sort_values(by='PER', ascending=True).head(30)
+    
     today_str = datetime.now().strftime('%Y-%m-%d')
     filename = f"reports/per_screener_{today_str}.md"
     os.makedirs("reports", exist_ok=True)
 
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"# 저PER 종목 스크리닝 리포트 ({today_str})\n\n")
-        f.write("## 📉 한국 증시(전체) PER 하위 30개 종목\n\n")
-        f.write("이 리포트는 최근 확정 영업이익을 기반으로 시장에서 가장 저평가된(PER 기준) 30개 종목을 보여줍니다.\n\n")
-        f.write("- **필터:** PER 0.5 미만(데이터 오류 가능성) 및 적자 종목 제외\n")
-        f.write("- **기준일:** 리포트 생성 시점의 최신 영업일\n\n")
-        f.write(top_30.reset_index().to_markdown(index=False))
+        f.write("## 📉 한국 증시(시총 상위 500개 중) PER 하위 30개 종목\n\n")
+        f.write("이 리포트는 네이버 금융 시가총액 상위 종목들을 전수 조사하여, 현재 주가 대비 영업이익(PER)이 가장 저평가된 30개 종목을 보여줍니다.\n\n")
+        f.write("- **기준:** 최근 확정 실적 기반 PER\n")
+        f.write("- **필터:** PER 0.5 미만 제외 및 시총 상위 500대 종목 중심\n\n")
+        f.write(top_30.to_markdown(index=False))
         f.write("\n\n*이 리포트는 자동 생성되었습니다.*")
 
-    print(f"스크리너 리포트 생성 완료: {filename}")
+    print(f"\n스크리너 리포트 생성 완료: {filename}")
 
 if __name__ == "__main__":
     main()
