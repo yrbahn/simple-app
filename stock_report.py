@@ -171,7 +171,7 @@ import urllib.parse
 
 def get_sector_news(sector):
     """
-    섹터별 주요 뉴스를 Google News RSS에서 가져옵니다.
+    섹터별 주요 뉴스를 가져오되, 유사한 제목의 중복 뉴스를 필터링합니다.
     """
     query = f"{sector} 주식 뉴스"
     encoded_query = urllib.parse.quote(query)
@@ -182,15 +182,38 @@ def get_sector_news(sector):
         res = requests.get(url, headers=headers, timeout=10)
         root = ET.fromstring(res.content)
         
-        news_items = []
-        for item in root.findall('.//item')[:3]:
+        raw_news = []
+        for item in root.findall('.//item')[:10]: # 일단 10개를 가져와서 필터링
             title = item.find('title').text
             link = item.find('link').text
-            # 출처 분리 (보통 '제목 - 언론사' 형식)
             if ' - ' in title:
                 title = title.rsplit(' - ', 1)[0]
-            news_items.append(f"- {title} ([링크]({link}))")
-        return news_items
+            raw_news.append({'title': title, 'link': link})
+            
+        # 중복/유사 제목 필터링 로직
+        filtered_news = []
+        seen_titles = []
+        
+        for news in raw_news:
+            is_duplicate = False
+            # 공백 기준 단어 집합 생성 (간단한 유사도 검사)
+            current_words = set(news['title'].split())
+            
+            for prev_title in seen_titles:
+                prev_words = set(prev_title.split())
+                # 공통 단어 비율 계산 (Jaccard 유사도 개념 차용)
+                intersection = current_words.intersection(prev_words)
+                if len(intersection) / min(len(current_words), len(prev_words)) > 0.5: # 50% 이상 겹치면 중복 간주
+                    is_duplicate = True
+                    break
+            
+            if not is_duplicate:
+                filtered_news.append(f"- {news['title']} ([링크]({news['link']}))")
+                seen_titles.append(news['title'])
+                if len(filtered_news) >= 3: # 최종적으로 3개만 유지
+                    break
+                    
+        return filtered_news if filtered_news else ["- 관련 뉴스가 없습니다."]
     except:
         return ["- 뉴스를 불러오지 못했습니다."]
 
